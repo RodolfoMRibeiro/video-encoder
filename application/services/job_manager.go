@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"strconv"
 
 	"github.com/jinzhu/gorm"
 	"github.com/streadway/amqp"
@@ -46,17 +45,16 @@ func (j *JobManager) Start(ch *amqp.Channel) {
 		VideoService:  videoService,
 	}
 
-	concurrency, err := strconv.Atoi(os.Getenv("CONCURRENCY_WORKERS"))
-
-	if err != nil {
-		log.Fatalf("error loading var: CONCURRENCY_WORKERS.")
-	}
-
-	for qtdProcesses := 0; qtdProcesses < concurrency; qtdProcesses++ {
-		go JobWorker(j.MessageChannel, j.JobReturnChannel, jobService, j.Domain, qtdProcesses)
-	}
+	go func(MessageChannel chan amqp.Delivery, JobReturnChannel chan JobWorkerResult, obService JobService, Domain domain.Job) {
+		var workerID int = 0
+		for message := range MessageChannel {
+			go JobWorker(message, j.JobReturnChannel, jobService, j.Domain, workerID)
+			workerID++
+		}
+	}(j.MessageChannel, j.JobReturnChannel, jobService, j.Domain)
 
 	for jobResult := range j.JobReturnChannel {
+		var err error
 		if jobResult.Error != nil {
 			err = j.checkParseErrors(jobResult)
 		} else {
